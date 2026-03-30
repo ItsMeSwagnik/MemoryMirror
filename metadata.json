@@ -1,0 +1,5 @@
+{
+  "name": "MemoryMirror",
+  "description": "AI-powered memory companion for dementia patients. Families upload photos, voice clips, and stories to build an interactive memory companion that speaks in familiar voices and shows familiar faces.",
+  "requestFramePermissions": ["camera", "microphone", "geolocation"]
+}
