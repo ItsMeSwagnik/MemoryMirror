@@ -78,22 +78,7 @@ npm install
 
 ### 2. Set up environment variables
 
-Copy `.env.example` to `.env.local` and fill in your keys:
-
-```env
-# Neon PostgreSQL — get from console.neon.tech
-DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
-
-# OpenRouter — get from openrouter.ai (free, no credit card needed)
-OPENROUTER_API_KEY=your_openrouter_api_key
-
-# ElevenLabs — get from elevenlabs.io (optional, has fallback)
-ELEVENLABS_API_KEY=your_elevenlabs_api_key
-
-# Cloudinary — get from cloudinary.com (free tier)
-VITE_CLOUDINARY_CLOUD_NAME=your_cloud_name
-VITE_CLOUDINARY_UPLOAD_PRESET=your_upload_preset
-```
+Copy `.env.example` to `.env.local` and fill in your keys.
 
 ### 3. Run the app
 
@@ -135,8 +120,7 @@ App runs at **http://localhost:4000**
 3. Paste into `ELEVENLABS_API_KEY` in `.env.local`
 > If not set, the app falls back to browser speech synthesis — it always works.
 
-### Firebase (Auth) — Already configured
-The Firebase project is already set up in `firebase-applet-config.json`. Auth (Google + Email) works out of the box. Make sure `localhost` is added to **Firebase Console → Authentication → Authorized domains**.
+### Firebase (Auth) — The Firebase is set up in `firebase-applet-config.json`. Auth (Google + Email) works out of the box. Make sure `localhost` is added to **Firebase Console → Authentication → Authorized domains**.
 
 ---
 
@@ -215,3 +199,9 @@ The Firebase project is already set up in `firebase-applet-config.json`. Auth (G
 ## 📄 License
 
 MIT — built with ❤️ for families navigating dementia care.
+
+## Copyright
+
+Copyright © 2026 MemoryMirror. All rights reserved.
+
+This project is licensed under the MIT License — you are free to use, modify, and distribute this software, provided the original copyright notice and license terms are retained.
