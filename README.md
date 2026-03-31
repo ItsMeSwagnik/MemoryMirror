@@ -120,7 +120,8 @@ App runs at **http://localhost:4000**
 3. Paste into `ELEVENLABS_API_KEY` in `.env.local`
 > If not set, the app falls back to browser speech synthesis — it always works.
 
-### Firebase (Auth) — The Firebase is set up in `firebase-applet-config.json`. Auth (Google + Email) works out of the box. Make sure `localhost` is added to **Firebase Console → Authentication → Authorized domains**.
+### Firebase (Auth) — 
+The Firebase is set up in `firebase-applet-config.json`. Auth (Google + Email) works out of the box. Make sure `localhost` is added to **Firebase Console → Authentication → Authorized domains**.
 
 ---
 
