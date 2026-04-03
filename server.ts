@@ -132,6 +132,12 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Fix COOP to allow Firebase Google sign-in popup
+  app.use((_req, res, next) => {
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+    next();
+  });
+
   // User role routes
   app.get("/api/user-role/:uid", async (req, res) => {
     try {

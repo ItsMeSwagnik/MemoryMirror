@@ -3,7 +3,7 @@ import { auth } from "../firebase";
 import { motion, AnimatePresence, useInView } from "framer-motion";
 import { Mic, MicOff, Volume2, Image as ImageIcon, Loader2, Camera, Music, Copy, Check, Clock, Play, X, Sparkles, BookOpen, MapPin, Aperture } from "lucide-react";
 import { generateMemoryResponse, identifyPerson } from "../services/aiService";
-import { cn } from "../lib/utils";
+import { cn, api } from "../lib/utils";
 
 // ── Timeline card with scroll-triggered animation ──────────────────────────
 function TimelineCard({ memory, voiceMap, onNarrate, index, isLeft }: {
@@ -164,7 +164,7 @@ function FlashbackOverlay({ memories, voiceMap, onDismiss }: {
 
     (async () => {
       try {
-        const res = await fetch("/api/tts", {
+        const res = await fetch(api("/api/tts"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text, voiceId }),
@@ -371,8 +371,8 @@ export default function PatientInterface({ patientName }: { patientName: string 
   const fetchMemories = async () => {
     try {
       const uid = auth.currentUser?.uid;
-      const url = uid ? `/api/memories?patientId=${uid}` : "/api/memories";
-      const [memRes, voiceRes] = await Promise.all([fetch(url), fetch("/api/voices")]);
+      const url = uid ? api(`/api/memories?patientId=${uid}`) : api("/api/memories");
+      const [memRes, voiceRes] = await Promise.all([fetch(url), fetch(api("/api/voices"))]);
       if (memRes.ok) {
         const data = await memRes.json();
         setMemories(data);
@@ -431,7 +431,7 @@ export default function PatientInterface({ patientName }: { patientName: string 
     try {
       if (voiceAudioRef.current) { voiceAudioRef.current.pause(); voiceAudioRef.current.src = ""; }
       window.speechSynthesis.cancel();
-      const response = await fetch("/api/tts", {
+      const response = await fetch(api("/api/tts"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, voiceId }),

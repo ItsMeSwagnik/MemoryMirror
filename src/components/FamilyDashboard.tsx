@@ -3,7 +3,7 @@ import { auth } from "../firebase";
 import { useDropzone } from "react-dropzone";
 import { motion, AnimatePresence } from "framer-motion";
 import { Upload, Image as ImageIcon, Mic, FileText, X, Plus, User, Calendar, MapPin, Loader2 } from "lucide-react";
-import { cn } from "../lib/utils";
+import { cn, api } from "../lib/utils";
 
 export default function FamilyDashboard() {
   const [memories, setMemories] = useState<any[]>([]);
@@ -25,7 +25,7 @@ export default function FamilyDashboard() {
   const fetchLinkedPatient = async () => {
     if (!auth.currentUser) return;
     try {
-      const res = await fetch(`/api/link-patient/${auth.currentUser.uid}`);
+      const res = await fetch(api(`/api/link-patient/${auth.currentUser.uid}`));
       if (res.ok) {
         const data = await res.json();
         setLinkedPatientId(data.linkedPatientId || null);
@@ -38,7 +38,7 @@ export default function FamilyDashboard() {
     setLinkLoading(true);
     setLinkError("");
     try {
-      const res = await fetch("/api/link-patient", {
+      const res = await fetch(api("/api/link-patient"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ familyUid: auth.currentUser.uid, patientUid: patientIdInput.trim() }),
@@ -57,7 +57,7 @@ export default function FamilyDashboard() {
   const fetchMemories = async () => {
     if (!auth.currentUser) return;
     try {
-      const response = await fetch(`/api/memories?authorId=${auth.currentUser.uid}`);
+      const response = await fetch(api(`/api/memories?authorId=${auth.currentUser.uid}`));
       if (response.ok) {
         const data = await response.json();
         setMemories(data);
@@ -72,7 +72,7 @@ export default function FamilyDashboard() {
 
   const fetchVoices = async () => {
     try {
-      const response = await fetch("/api/voices");
+      const response = await fetch(api("/api/voices"));
       if (response.ok) {
         const data = await response.json();
         setVoices(data);
@@ -93,14 +93,14 @@ export default function FamilyDashboard() {
     setCloning(true);
     try {
       // Try OmniVoice first (stores Cloudinary URL as voice_id for zero-shot cloning)
-      let response = await fetch("/api/omnivoice-clone", {
+      let response = await fetch(api("/api/omnivoice-clone"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: memory.people[0], sampleUrl: memory.file_url }),
       });
       // Fall back to ElevenLabs if OmniVoice service is not running
       if (!response.ok) {
-        response = await fetch("/api/clone-voice", {
+        response = await fetch(api("/api/clone-voice"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name: memory.people[0], sampleUrl: memory.file_url }),
@@ -146,7 +146,7 @@ export default function FamilyDashboard() {
       }
 
       console.log("Saving to Neon PostgreSQL...");
-      const response = await fetch("/api/memories", {
+      const response = await fetch(api("/api/memories"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

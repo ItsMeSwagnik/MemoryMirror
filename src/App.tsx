@@ -5,7 +5,7 @@ import FamilyDashboard from "./components/FamilyDashboard";
 import PatientInterface from "./components/PatientInterface";
 import { motion, AnimatePresence, useScroll, useTransform, useSpring } from "framer-motion";
 import { User, Heart, ArrowRight, LogOut, Mail, Lock, Eye, EyeOff, Loader2, Sun, Moon, Shield, Info, Brain, Users, Sparkles, ChevronDown, X } from "lucide-react";
-import { cn } from "./lib/utils";
+import { cn, api } from "./lib/utils";
 
 export default function App() {
   const [view, setView] = useState<"landing" | "family" | "patient" | "profile" | "legal">("landing");
@@ -17,6 +17,7 @@ export default function App() {
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [authError, setAuthError] = useState("");
   const [pendingView, setPendingView] = useState<"family" | "patient" | null>(null);
   const [selectedRole, setSelectedRole] = useState<"family" | "patient">("family");
   const [theme, setTheme] = useState<"light" | "dark" | "system">(() => {
@@ -103,11 +104,14 @@ export default function App() {
   };
 
   const fetchUserRole = async (uid: string): Promise<"family" | "patient" | null> => {
+    // Check localStorage first (works without backend)
+    const cached = localStorage.getItem(`role_${uid}`);
+    if (cached === "family" || cached === "patient") return cached;
     try {
-      const res = await fetch(`/api/user-role/${uid}`);
-      if (res.status === 404) return null; // New user, not yet saved
+      const res = await fetch(api(`/api/user-role/${uid}`));
       if (!res.ok) return null;
       const data = await res.json();
+      if (data.role) localStorage.setItem(`role_${uid}`, data.role);
       return data.role;
     } catch {
       return null;
@@ -115,11 +119,16 @@ export default function App() {
   };
 
   const saveUserRole = async (uid: string, role: "family" | "patient") => {
-    await fetch("/api/user-role", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ uid, role }),
-    });
+    localStorage.setItem(`role_${uid}`, role);
+    try {
+      await fetch(api("/api/user-role"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid, role }),
+      });
+    } catch {
+      // Backend unavailable — role is saved in localStorage, app still works
+    }
   };
 
   useEffect(() => {
@@ -166,6 +175,7 @@ export default function App() {
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setAuthError("");
     try {
       if (authMode === "signup") {
         const result = await createUserWithEmailAndPassword(auth, email, password);
@@ -180,7 +190,17 @@ export default function App() {
         setView(role || "family");
       }
     } catch (error: any) {
-      console.error("Auth error:", error);
+      const code = error?.code ?? "";
+      if (code === "auth/user-not-found" || code === "auth/wrong-password" || code === "auth/invalid-credential")
+        setAuthError("Incorrect email or password.");
+      else if (code === "auth/email-already-in-use")
+        setAuthError("An account with this email already exists.");
+      else if (code === "auth/weak-password")
+        setAuthError("Password must be at least 6 characters.");
+      else if (code === "auth/unauthorized-domain")
+        setAuthError("This domain is not authorised in Firebase. Add it under Authentication → Authorized domains.");
+      else
+        setAuthError(error?.message ?? "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -543,7 +563,7 @@ export default function App() {
                 <h2 className="text-3xl font-serif font-medium mb-2">{user?.displayName || "Family Member"}</h2>
                 <p className="text-muted">{user?.email}</p>
                 <div className="mt-4 px-4 py-1.5 rounded-full bg-ink/5 text-xs font-bold uppercase tracking-widest">
-                  {view === "patient" ? "Patient Account" : "Family Account"}
+                  {localStorage.getItem(`role_${user?.uid}`) === "patient" ? "Patient Account" : "Family Account"}
                 </div>
               </div>
 
@@ -701,6 +721,10 @@ export default function App() {
                   </button>
                 </div>
 
+                {authError && (
+                  <p className="text-red-500 text-sm text-center">{authError}</p>
+                )}
+
                 <button
                   type="submit"
                   disabled={loading}
@@ -748,7 +772,7 @@ export default function App() {
               <p className="mt-8 text-center text-sm text-muted">
                 {authMode === "login" ? "Don't have an account?" : "Already have an account?"}{" "}
                 <button
-                  onClick={() => setAuthMode(authMode === "login" ? "signup" : "login")}
+                  onClick={() => { setAuthMode(authMode === "login" ? "signup" : "login"); setAuthError(""); }}
                   className="text-ink font-semibold hover:underline"
                 >
                   {authMode === "login" ? "Sign Up" : "Sign In"}
