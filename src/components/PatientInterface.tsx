@@ -1,12 +1,340 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { auth } from "../firebase";
-import { motion, AnimatePresence } from "framer-motion";
-import { Mic, MicOff, Volume2, Image as ImageIcon, Heart, ArrowRight, Loader2, Camera, Music, Copy, Check } from "lucide-react";
+import { motion, AnimatePresence, useInView } from "framer-motion";
+import { Mic, MicOff, Volume2, Image as ImageIcon, Loader2, Camera, Music, Copy, Check, Clock, Play, X, Sparkles, BookOpen, MapPin, Aperture } from "lucide-react";
 import { generateMemoryResponse, identifyPerson } from "../services/aiService";
 import { cn } from "../lib/utils";
 
+// ── Timeline card with scroll-triggered animation ──────────────────────────
+function TimelineCard({ memory, voiceMap, onNarrate, index, isLeft }: {
+  memory: any;
+  voiceMap: Record<string, string>;
+  onNarrate: (memory: any, voiceId?: string) => void;
+  index: number;
+  isLeft: boolean;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const inView = useInView(ref, { once: true, margin: "-60px" });
+  const person = memory.people?.[0] ?? "Unknown";
+  const voiceId = voiceMap[person.toLowerCase()];
+
+  return (
+    <div ref={ref} className={cn("flex w-full items-start gap-4", isLeft ? "flex-row" : "flex-row-reverse")}>
+      {/* Card */}
+      <motion.div
+        initial={{ opacity: 0, x: isLeft ? -40 : 40 }}
+        animate={inView ? { opacity: 1, x: 0 } : {}}
+        transition={{ duration: 0.5, delay: index * 0.05, ease: "easeOut" }}
+        className="flex-1 bg-surface/70 backdrop-blur-md border border-border-color rounded-2xl overflow-hidden shadow-lg"
+      >
+        {memory.type === "photo" && memory.file_url && (
+          <img src={memory.file_url} alt={memory.occasion ?? "memory"} className="w-full h-40 object-cover" />
+        )}
+        <div className="p-4 space-y-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="font-sans text-xs uppercase tracking-widest text-muted flex items-center gap-1.5">
+              {memory.type === "photo" ? <Aperture size={12} /> : memory.type === "voice" ? <Volume2 size={12} /> : <BookOpen size={12} />}
+              {memory.occasion ?? memory.type}
+            </span>
+            {memory.year && <span className="font-mono text-xs text-muted">{memory.year}</span>}
+          </div>
+          {memory.transcript && (
+            <p className="text-sm text-ink leading-relaxed line-clamp-3">{memory.transcript}</p>
+          )}
+          {memory.location && <p className="text-xs text-muted flex items-center gap-1"><MapPin size={11} />{memory.location}</p>}
+          {memory.people?.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {memory.people.map((p: string) => (
+                <span key={p} className="text-xs bg-ink/10 text-ink px-2 py-0.5 rounded-full">{p}</span>
+              ))}
+            </div>
+          )}
+          <button
+            onClick={() => onNarrate(memory, voiceId)}
+            className="mt-1 flex items-center gap-1.5 text-xs font-sans uppercase tracking-widest text-ink bg-ink/10 hover:bg-ink/20 px-3 py-1.5 rounded-full transition-colors"
+          >
+            <Play size={12} /> Narrate{voiceId ? " in their voice" : ""}
+          </button>
+        </div>
+      </motion.div>
+
+      {/* Timeline dot */}
+      <motion.div
+        initial={{ scale: 0 }}
+        animate={inView ? { scale: 1 } : {}}
+        transition={{ duration: 0.3, delay: index * 0.05 + 0.2 }}
+        className="mt-6 w-3 h-3 rounded-full bg-ink flex-shrink-0 ring-4 ring-bg"
+      />
+    </div>
+  );
+}
+
+// ── Person group on the timeline ─────────────────────────────────────────────
+function PersonTimeline({ person, memories, voiceMap, onNarrate, groupIndex }: {
+  person: string;
+  memories: any[];
+  voiceMap: Record<string, string>;
+  onNarrate: (memory: any, voiceId?: string) => void;
+  groupIndex: number;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const inView = useInView(ref, { once: true, margin: "-40px" });
+  const sorted = [...memories].sort((a, b) => (a.year ?? 0) - (b.year ?? 0));
+
+  return (
+    <div ref={ref} className="mb-12">
+      <motion.div
+        initial={{ opacity: 0, y: -16 }}
+        animate={inView ? { opacity: 1, y: 0 } : {}}
+        transition={{ duration: 0.4, delay: groupIndex * 0.1 }}
+        className="flex items-center gap-3 mb-6"
+      >
+        <div className="w-10 h-10 rounded-full bg-ink/10 flex items-center justify-center text-lg font-serif font-bold text-ink">
+          {person[0]?.toUpperCase()}
+        </div>
+        <h3 className="text-xl font-serif font-semibold text-ink">{person}</h3>
+        {voiceMap[person.toLowerCase()] && (
+          <span className="text-xs font-sans uppercase tracking-widest text-muted bg-surface px-2 py-0.5 rounded-full border border-border-color">voice cloned</span>
+        )}
+      </motion.div>
+
+      {/* Vertical line + cards */}
+      <div className="relative pl-4">
+        <motion.div
+          initial={{ scaleY: 0 }}
+          animate={inView ? { scaleY: 1 } : {}}
+          transition={{ duration: 0.6, delay: groupIndex * 0.1 + 0.2, ease: "easeInOut" }}
+          style={{ originY: 0 }}
+          className="absolute left-[calc(50%-1px)] top-0 bottom-0 w-0.5 bg-ink/20"
+        />
+        <div className="space-y-6">
+          {sorted.map((m, i) => (
+            <TimelineCard
+              key={m.id}
+              memory={m}
+              voiceMap={voiceMap}
+              onNarrate={onNarrate}
+              index={i}
+              isLeft={i % 2 === 0}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Flashback overlay ───────────────────────────────────────────────────────
+function FlashbackOverlay({ memories, voiceMap, onDismiss }: {
+  memories: any[];
+  voiceMap: Record<string, string>;
+  onDismiss: () => void;
+}) {
+  const sorted = [...memories].sort((a, b) => (a.year ?? 9999) - (b.year ?? 9999));
+  const [idx, setIdx] = useState(0);
+  const [narrating, setNarrating] = useState(false);
+  const [caption, setCaption] = useState("");
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const current = sorted[idx];
+
+  const advance = useCallback(() => {
+    setIdx(i => {
+      if (i + 1 >= sorted.length) { onDismiss(); return i; }
+      return i + 1;
+    });
+  }, [sorted.length, onDismiss]);
+
+  useEffect(() => {
+    if (!current) return;
+    let cancelled = false;
+    setNarrating(true);
+    setCaption("");
+
+    const person = current.people?.[0] ?? null;
+    const voiceId = person ? voiceMap[person.toLowerCase()] : undefined;
+    const text = current.transcript ||
+      `A memory from ${current.year ?? "the past"}${
+        current.occasion ? `, ${current.occasion}` : ""
+      }${person ? `, with ${person}` : ""}${
+        current.location ? `, in ${current.location}` : ""
+      }.`;
+
+    setCaption(text);
+
+    (async () => {
+      try {
+        const res = await fetch("/api/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, voiceId }),
+        });
+        if (cancelled) return;
+        if (res.ok) {
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          if (audioRef.current && !cancelled) {
+            audioRef.current.src = url;
+            audioRef.current.onended = () => {
+              if (cancelled) return;
+              setNarrating(false);
+              advanceTimer.current = setTimeout(advance, 2800);
+            };
+            audioRef.current.play().catch(() => {
+              if (!cancelled) { setNarrating(false); advanceTimer.current = setTimeout(advance, 4000); }
+            });
+          }
+        } else {
+          const utt = new SpeechSynthesisUtterance(text);
+          utt.rate = 0.88; utt.pitch = 1.05;
+          utt.onend = () => { if (!cancelled) { setNarrating(false); advanceTimer.current = setTimeout(advance, 2800); } };
+          window.speechSynthesis.speak(utt);
+        }
+      } catch {
+        if (!cancelled) { setNarrating(false); advanceTimer.current = setTimeout(advance, 4000); }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (advanceTimer.current) clearTimeout(advanceTimer.current);
+      if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = ""; }
+      window.speechSynthesis.cancel();
+    };
+  }, [idx]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.8 }}
+      className="fixed inset-0 z-50 bg-black flex flex-col"
+      onClick={onDismiss}
+    >
+      <audio ref={audioRef} />
+
+      {/* Full-bleed photo with Ken Burns */}
+      <div className="absolute inset-0 overflow-hidden">
+        <AnimatePresence mode="wait">
+          {current?.file_url ? (
+            <motion.img
+              key={current.id}
+              src={current.file_url}
+              initial={{ scale: 1.08, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.96, opacity: 0 }}
+              transition={{ duration: 1.2, ease: "easeInOut" }}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <motion.div
+              key={`bg-${idx}`}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 1 }}
+              className="w-full h-full bg-gradient-to-br from-[#1a1a2e] via-[#16213e] to-[#0f3460]"
+            />
+          )}
+        </AnimatePresence>
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-black/50 pointer-events-none" />
+      </div>
+
+      {/* Top bar */}
+      <div className="relative z-10 flex items-center justify-between px-6 pt-6">
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-center gap-2 text-white/60 font-sans text-xs uppercase tracking-widest"
+        >
+          <Sparkles size={14} />
+          <span>Flashback</span>
+        </motion.div>
+        <button
+          onClick={e => { e.stopPropagation(); onDismiss(); }}
+          className="text-white/50 hover:text-white transition-colors"
+        >
+          <X size={20} />
+        </button>
+      </div>
+
+      {/* Centre: person + year + occasion */}
+      <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-8 text-center">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={current?.id}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.7, delay: 0.3 }}
+            className="space-y-3"
+          >
+            {current?.people?.[0] && (
+              <p className="text-white/50 font-sans text-sm uppercase tracking-[0.2em]">{current.people[0]}</p>
+            )}
+            {current?.year && (
+              <p className="text-white/25 font-mono text-6xl font-bold leading-none">{current.year}</p>
+            )}
+            {current?.occasion && (
+              <p className="text-white/60 font-serif text-xl italic">{current.occasion}</p>
+            )}
+          </motion.div>
+        </AnimatePresence>
+      </div>
+
+      {/* Caption */}
+      <div className="relative z-10 px-8 pb-4 min-h-[80px] flex items-end justify-center">
+        <AnimatePresence mode="wait">
+          {caption && (
+            <motion.p
+              key={caption}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.6, delay: 0.5 }}
+              className="text-white/80 font-serif text-base sm:text-lg text-center leading-relaxed max-w-xl line-clamp-3"
+            >
+              {caption}
+            </motion.p>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Waveform + progress dots */}
+      <div className="relative z-10 flex flex-col items-center gap-3 pb-8">
+        {narrating && (
+          <div className="flex gap-1 items-end h-5">
+            {[0,1,2,3,4].map(i => (
+              <motion.div
+                key={i}
+                animate={{ height: [6, 18, 6] }}
+                transition={{ repeat: Infinity, duration: 0.5, delay: i * 0.1 }}
+                className="w-1 bg-white/60 rounded-full"
+              />
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2">
+          {sorted.map((_, i) => (
+            <motion.div
+              key={i}
+              animate={{ scale: i === idx ? 1.4 : 1, opacity: i === idx ? 1 : 0.3 }}
+              transition={{ duration: 0.3 }}
+              className="w-1.5 h-1.5 rounded-full bg-white"
+            />
+          ))}
+        </div>
+        <p className="text-white/30 font-sans text-xs uppercase tracking-widest mt-1">Tap anywhere to return</p>
+      </div>
+    </motion.div>
+  );
+}
+
 export default function PatientInterface({ patientName }: { patientName: string }) {
+  const [activeTab, setActiveTab] = useState<"companion" | "timeline">("companion");
   const [memories, setMemories] = useState<any[]>([]);
+  const [voices, setVoices] = useState<any[]>([]);
   const [currentPhoto, setCurrentPhoto] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [aiResponse, setAiResponse] = useState<string>(`Hello ${patientName}. I'm here to remember with you.`);
@@ -18,6 +346,8 @@ export default function PatientInterface({ patientName }: { patientName: string 
   const [lastInputMethod, setLastInputMethod] = useState<"text" | "voice">("text");
   const [isVoiceSupported, setIsVoiceSupported] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [narratingId, setNarratingId] = useState<number | null>(null);
+  const [flashbackActive, setFlashbackActive] = useState(false);
 
   const patientUid = auth.currentUser?.uid;
 
@@ -42,13 +372,16 @@ export default function PatientInterface({ patientName }: { patientName: string 
     try {
       const uid = auth.currentUser?.uid;
       const url = uid ? `/api/memories?patientId=${uid}` : "/api/memories";
-      const response = await fetch(url);
-      if (response.ok) {
-        const data = await response.json();
+      const [memRes, voiceRes] = await Promise.all([fetch(url), fetch("/api/voices")]);
+      if (memRes.ok) {
+        const data = await memRes.json();
         setMemories(data);
         memoriesRef.current = data;
         const firstPhoto = data.find((m: any) => m.type === "photo");
         if (firstPhoto) setCurrentPhoto(firstPhoto.file_url);
+      }
+      if (voiceRes.ok) {
+        setVoices(await voiceRes.json());
       }
     } catch (error) {
       console.error("Failed to fetch memories:", error);
@@ -58,6 +391,62 @@ export default function PatientInterface({ patientName }: { patientName: string 
   useEffect(() => {
     fetchMemories();
   }, []);
+
+  // voiceMap: person name (lowercase) -> elevenlabs voice_id
+  const voiceMap: Record<string, string> = {};
+  for (const v of voices) {
+    voiceMap[v.person_name.toLowerCase()] = v.voice_id;
+  }
+
+  // Group memories by first person tagged
+  const personGroups: Record<string, any[]> = {};
+  for (const m of memories) {
+    const person = m.people?.[0] ?? "Untagged";
+    if (!personGroups[person]) personGroups[person] = [];
+    personGroups[person].push(m);
+  }
+
+  const narrateMemory = async (memory: any, voiceId?: string) => {
+    setNarratingId(memory.id);
+    setActiveTab("companion");
+    if (memory.type === "photo" && memory.file_url) setCurrentPhoto(memory.file_url);
+    const text = memory.transcript ||
+      `This is a ${memory.type} memory from ${memory.year ?? "the past"}${
+        memory.occasion ? ` — ${memory.occasion}` : ""
+      }${
+        memory.people?.length ? ` with ${memory.people.join(", ")}` : ""
+      }${
+        memory.location ? ` in ${memory.location}` : ""
+      }.`;
+    setAiResponse(text);
+    setLastInputMethod("text");
+    await speakWithVoice(text, voiceId);
+    setNarratingId(null);
+  };
+
+  const speakWithVoice = async (text: string, voiceId?: string) => {
+    if (!text) return;
+    const wasListening = isListeningRef.current;
+    if (wasListening) { try { recognitionRef.current?.stop(); } catch (e) {} }
+    try {
+      if (voiceAudioRef.current) { voiceAudioRef.current.pause(); voiceAudioRef.current.src = ""; }
+      window.speechSynthesis.cancel();
+      const response = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, voiceId }),
+      });
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        if (voiceAudioRef.current) {
+          voiceAudioRef.current.src = url;
+          voiceAudioRef.current.onended = () => { if (wasListening) { try { recognitionRef.current?.start(); } catch (e) {} } };
+          voiceAudioRef.current.play().catch(() => fallbackSpeak(text, wasListening));
+        }
+      } else { fallbackSpeak(text, wasListening); }
+    } catch { fallbackSpeak(text, wasListening); }
+  };
 
   useEffect(() => {
     if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
@@ -120,55 +509,38 @@ export default function PatientInterface({ patientName }: { patientName: string 
     };
   }, []);
 
-  useEffect(() => {
-    // Proactive Mode: Every 60 seconds if idle
-    const proactiveInterval = setInterval(() => {
-      const idleTime = Date.now() - lastInteractionRef.current;
-      if (idleTime > 60000 && memoriesRef.current.length > 0) {
-        triggerProactiveMemory();
-      }
-    }, 10000);
-
-    return () => clearInterval(proactiveInterval);
+  const dismissFlashback = useCallback(() => {
+    setFlashbackActive(false);
+    lastInteractionRef.current = Date.now();
   }, []);
 
-  const triggerProactiveMemory = async () => {
-    const currentMemories = memoriesRef.current;
-    const randomMemory = currentMemories[Math.floor(Math.random() * currentMemories.length)];
-    if (!randomMemory) return;
-
-    setIsThinking(true);
-    setLastInputMethod("text"); // Show text for proactive memories
-    const prompt = `${patientName} hasn't spoken in a while. Proactively share a warm memory about ${randomMemory.occasion || "a special day"}.`;
-    try {
-      const response = await generateMemoryResponse(patientName, prompt, currentMemories);
-      setAiResponse(response || "");
-      if (randomMemory.type === 'photo') setCurrentPhoto(randomMemory.file_url);
-      speak(response || "");
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsThinking(false);
-      lastInteractionRef.current = Date.now();
-    }
-  };
+  useEffect(() => {
+    const idleInterval = setInterval(() => {
+      const idleTime = Date.now() - lastInteractionRef.current;
+      if (idleTime > 60000 && memoriesRef.current.length > 0 && !flashbackActive) {
+        setFlashbackActive(true);
+      }
+    }, 10000);
+    return () => clearInterval(idleInterval);
+  }, [flashbackActive]);
 
   const handleVoiceInput = async (text: string) => {
     lastInteractionRef.current = Date.now();
     setIsThinking(true);
     const currentMemories = memoriesRef.current;
     try {
-      const response = await generateMemoryResponse(patientName, text, currentMemories);
-      setAiResponse(response || "");
-      
-      const relevantMemory = currentMemories.find(m => 
-        m.type === 'photo' && 
+      const { text: responseText, speakerName } = await generateMemoryResponse(patientName, text, currentMemories);
+      setAiResponse(responseText);
+
+      const relevantMemory = currentMemories.find((m: any) =>
+        m.type === 'photo' &&
         ((m.people && Array.isArray(m.people) && m.people.some((p: string) => text.toLowerCase().includes(p.toLowerCase()))) ||
          (m.occasion && m.occasion.toLowerCase().includes(text.toLowerCase())))
       );
       if (relevantMemory) setCurrentPhoto(relevantMemory.file_url);
 
-      speak(response || "");
+      const vid = speakerName ? voiceMap[speakerName.toLowerCase()] : undefined;
+      speakWithVoice(responseText, vid);
     } catch (error) {
       console.error(error);
     } finally {
@@ -176,59 +548,7 @@ export default function PatientInterface({ patientName }: { patientName: string 
     }
   };
 
-  const speak = async (text: string) => {
-    if (!text) return;
-    
-    // Pause listening while speaking to avoid feedback
-    const wasListening = isListeningRef.current;
-    if (wasListening) {
-      try {
-        recognitionRef.current?.stop();
-      } catch (e) {}
-    }
-
-    try {
-      // Stop any current speaking
-      if (voiceAudioRef.current) {
-        voiceAudioRef.current.pause();
-        voiceAudioRef.current.src = "";
-      }
-      window.speechSynthesis.cancel();
-
-      // Try ElevenLabs first
-      const response = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        if (voiceAudioRef.current) {
-          voiceAudioRef.current.src = url;
-          
-          voiceAudioRef.current.onended = () => {
-            if (wasListening) {
-              try {
-                recognitionRef.current?.start();
-              } catch (e) {}
-            }
-          };
-
-          voiceAudioRef.current.play().catch(err => {
-            console.error("Audio play failed:", err);
-            fallbackSpeak(text, wasListening);
-          });
-        }
-      } else {
-        fallbackSpeak(text, wasListening);
-      }
-    } catch (error) {
-      console.error("TTS Error:", error);
-      fallbackSpeak(text, wasListening);
-    }
-  };
+  const speak = (text: string) => speakWithVoice(text);
 
   const fallbackSpeak = (text: string, wasListening: boolean) => {
     const utterance = new SpeechSynthesisUtterance(text);
@@ -289,7 +609,7 @@ export default function PatientInterface({ patientName }: { patientName: string 
   }, [showCamera]);
 
   const stopCamera = () => {
-    cameraStreamRef.current?.getTracks().forEach(track => track.stop());
+    cameraStreamRef.current?.getTracks().forEach((track: MediaStreamTrack) => track.stop());
     cameraStreamRef.current = null;
     setShowCamera(false);
   };
@@ -329,8 +649,64 @@ export default function PatientInterface({ patientName }: { patientName: string 
   }, [isMusicPlaying]);
 
   return (
-    <div className="min-h-screen bg-bg flex flex-col items-center justify-center px-4 sm:px-8 py-6 font-serif overflow-hidden">
-      <div className="max-w-4xl w-full flex flex-col items-center gap-6 sm:gap-12">
+    <div className="min-h-screen bg-bg flex flex-col items-center px-4 sm:px-8 py-6 font-serif overflow-hidden">
+      {/* Tab bar */}
+      <div className="flex gap-2 mb-8 bg-surface/60 backdrop-blur-md border border-border-color rounded-full p-1 shadow-sm">
+        {(["companion", "timeline"] as const).map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={cn(
+              "px-6 py-2 rounded-full font-sans text-sm uppercase tracking-widest transition-all",
+              activeTab === tab ? "bg-ink text-bg shadow" : "text-muted hover:text-ink"
+            )}
+          >
+            <span className="flex items-center gap-2">
+              {tab === "companion" ? <Sparkles size={14} /> : <Clock size={14} />}
+              {tab === "companion" ? "Companion" : "Timeline"}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <AnimatePresence mode="wait">
+        {activeTab === "timeline" ? (
+          <motion.div
+            key="timeline"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.35 }}
+            className="w-full max-w-2xl pb-24"
+          >
+            {Object.keys(personGroups).length === 0 ? (
+              <div className="flex flex-col items-center gap-4 mt-20 text-muted">
+                <Clock size={48} className="opacity-30" />
+                <p className="font-sans text-sm uppercase tracking-widest">No memories yet</p>
+                <p className="text-sm text-center">Ask a family member to upload memories for you.</p>
+              </div>
+            ) : (
+              Object.entries(personGroups).map(([person, mems], gi) => (
+                <PersonTimeline
+                  key={person}
+                  person={person}
+                  memories={mems}
+                  voiceMap={voiceMap}
+                  onNarrate={narrateMemory}
+                  groupIndex={gi}
+                />
+              ))
+            )}
+          </motion.div>
+        ) : (
+          <motion.div
+            key="companion"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.35 }}
+            className="max-w-4xl w-full flex flex-col items-center gap-6 sm:gap-12"
+          >
         
         {/* Memory Visual / Camera */}
         <motion.div 
@@ -521,7 +897,20 @@ export default function PatientInterface({ patientName }: { patientName: string 
             <span>Recalling...</span>
           </div>
         )}
-      </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Flashback mode */}
+      <AnimatePresence>
+        {flashbackActive && memories.length > 0 && (
+          <FlashbackOverlay
+            memories={memories}
+            voiceMap={voiceMap}
+            onDismiss={dismissFlashback}
+          />
+        )}
+      </AnimatePresence>
 
       <audio ref={ambientAudioRef} loop src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" />
       <audio ref={voiceAudioRef} />

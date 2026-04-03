@@ -22,7 +22,7 @@ export async function generateMemoryResponse(
   patientName: string,
   userMessage: string,
   memories: any[]
-): Promise<string> {
+): Promise<{ text: string; speakerName: string | null }> {
   const memoryContext = memories
     .map((m) => {
       let ctx = `Memory Type: ${m.type}. `;
@@ -34,22 +34,32 @@ export async function generateMemoryResponse(
     })
     .join("\n");
 
+  // Collect all known people names
+  const knownPeople = [...new Set(memories.flatMap(m => m.people || []))] as string[];
+
   const systemPrompt = `You are a gentle, warm memory companion for ${patientName}, who has dementia.
 Be deeply empathetic, patient, and kind. Use simple but descriptive language.
 Use ONLY the provided memories — never invent facts. Be conversational and varied.
+At the END of your response, on a new line, write SPEAKER: <name> where <name> is the person whose voice should narrate this (pick from: ${knownPeople.join(", ") || "none"}). If no specific person is relevant, write SPEAKER: none.
 
 Memories you know:
 ${memoryContext}`;
 
   try {
-    const text = await openRouterChat([
+    const raw = await openRouterChat([
       { role: "system", content: systemPrompt },
       { role: "user", content: userMessage },
     ]);
-    return text || "I'm right here with you. It's a lovely day to talk.";
+
+    // Parse out SPEAKER tag
+    const speakerMatch = raw.match(/\nSPEAKER:\s*(.+)$/i);
+    const speakerName = speakerMatch ? speakerMatch[1].trim() : null;
+    const text = raw.replace(/\nSPEAKER:\s*.+$/i, "").trim();
+
+    return { text: text || "I'm right here with you. It's a lovely day to talk.", speakerName: speakerName === "none" ? null : speakerName };
   } catch (error) {
     console.error("AI chat error:", error);
-    return "I'm right here with you. It's a lovely day to talk.";
+    return { text: "I'm right here with you. It's a lovely day to talk.", speakerName: null };
   }
 }
 

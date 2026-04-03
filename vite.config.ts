@@ -13,4 +13,8 @@ export default defineConfig({
   server: {
     hmr: true,
   },
+  optimizeDeps: {
+    exclude: ['omnivoice_service'],
+    entries: ['src/**/*.{ts,tsx}'],
+  },
 });

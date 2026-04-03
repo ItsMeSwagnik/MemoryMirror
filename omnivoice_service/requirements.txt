@@ -1,0 +1,6 @@
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+omnivoice
+torch==2.8.*
+torchaudio==2.8.*
+pydantic>=2.0.0

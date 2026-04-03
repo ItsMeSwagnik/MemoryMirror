@@ -1,9 +1,33 @@
+# Dependencies
 node_modules/
+
+# Build outputs
 build/
 dist/
+
+# Test coverage
 coverage/
-.DS_Store
-*.log
-.env*
+
+# Environment variables — never commit secrets
+.env
+.env.local
+.env.*.local
 !.env.example
+
+# Firebase config — contains project credentials
 firebase-applet-config.json
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.log
+*.tsbuildinfo
+
+# Python (OmniVoice microservice)
+omnivoice_service/__pycache__/
+omnivoice_service/*.pyc
+omnivoice_service/.venv/
+omnivoice_service/venv/
+
+# Misc
+metadata.json

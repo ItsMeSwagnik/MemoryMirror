@@ -182,6 +182,62 @@ async function startServer() {
     }
   });
 
+  const OMNIVOICE_URL = "http://localhost:8000";
+
+  // Check if OmniVoice microservice is running
+  async function omnivoiceAvailable(): Promise<boolean> {
+    try {
+      const r = await fetch(`${OMNIVOICE_URL}/health`, { signal: AbortSignal.timeout(1000) });
+      return r.ok;
+    } catch { return false; }
+  }
+
+  // OmniVoice TTS proxy
+  app.post("/api/omnivoice-tts", async (req, res) => {
+    try {
+      const { text, refAudioUrl, instruct } = req.body;
+      const r = await fetch(`${OMNIVOICE_URL}/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, ref_audio_url: refAudioUrl ?? null, instruct: instruct ?? null }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        return res.status(r.status).json({ error: "OmniVoice error", detail: err });
+      }
+      const buf = await r.arrayBuffer();
+      res.set("Content-Type", "audio/wav");
+      res.send(Buffer.from(buf));
+    } catch (err: any) {
+      res.status(503).json({ error: "OmniVoice unavailable", detail: err.message });
+    }
+  });
+
+  // OmniVoice voice clone proxy
+  app.post("/api/omnivoice-clone", async (req, res) => {
+    try {
+      const { name, sampleUrl } = req.body;
+      const r = await fetch(`${OMNIVOICE_URL}/clone`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, sample_url: sampleUrl }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        return res.status(r.status).json({ error: "OmniVoice clone error", detail: err });
+      }
+      const { voice_id } = await r.json();
+      // Store in DB same as ElevenLabs clones
+      await query(
+        "INSERT INTO people_voices (person_name, voice_id) VALUES ($1, $2) ON CONFLICT (person_name) DO UPDATE SET voice_id = $2",
+        [name, voice_id]
+      );
+      res.json({ voiceId: voice_id, name, provider: "omnivoice" });
+    } catch (err: any) {
+      res.status(503).json({ error: "OmniVoice unavailable", detail: err.message });
+    }
+  });
+
   // ElevenLabs TTS Proxy
   app.post("/api/tts", async (req, res) => {
     try {

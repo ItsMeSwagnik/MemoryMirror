@@ -92,18 +92,21 @@ export default function FamilyDashboard() {
     if (!memory.people?.[0]) return;
     setCloning(true);
     try {
-      const response = await fetch("/api/clone-voice", {
+      // Try OmniVoice first (stores Cloudinary URL as voice_id for zero-shot cloning)
+      let response = await fetch("/api/omnivoice-clone", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: memory.people[0],
-          sampleUrl: memory.file_url,
-        }),
+        body: JSON.stringify({ name: memory.people[0], sampleUrl: memory.file_url }),
       });
-      if (response.ok) {
-        console.log(`Voice for ${memory.people[0]} cloned successfully!`);
-        fetchVoices();
+      // Fall back to ElevenLabs if OmniVoice service is not running
+      if (!response.ok) {
+        response = await fetch("/api/clone-voice", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: memory.people[0], sampleUrl: memory.file_url }),
+        });
       }
+      if (response.ok) fetchVoices();
     } catch (error) {
       console.error(error);
     } finally {
