@@ -1,5 +1,5 @@
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
-const CHAT_MODEL = "mistralai/mistral-small-3.1-24b-instruct:free";
+const CHAT_MODEL = "mistralai/mistral-small-3.2-24b-instruct:free";
 const VISION_MODEL = "meta-llama/llama-3.2-11b-vision-instruct:free";
 
 async function openRouterChat(messages: object[], model = CHAT_MODEL): Promise<string> {
@@ -8,7 +8,7 @@ async function openRouterChat(messages: object[], model = CHAT_MODEL): Promise<s
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${import.meta.env.VITE_OPENROUTER_API_KEY || ""}`,
-      "HTTP-Referer": "http://localhost:4000",
+      "HTTP-Referer": typeof window !== "undefined" ? window.location.origin : "https://memory-mirror-three.vercel.app",
     },
     body: JSON.stringify({ model, messages }),
   });
