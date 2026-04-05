@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { auth } from "../firebase";
 import { useDropzone } from "react-dropzone";
 import { motion, AnimatePresence } from "framer-motion";
-import { Upload, Image as ImageIcon, Mic, FileText, X, Plus, User, Calendar, MapPin, Loader2 } from "lucide-react";
+import { Upload, Image as ImageIcon, Mic, FileText, X, Plus, User, Calendar, MapPin, Loader2, Link2, Volume2, Check } from "lucide-react";
 import { cn, api } from "../lib/utils";
 
 export default function FamilyDashboard() {
@@ -14,6 +14,8 @@ export default function FamilyDashboard() {
   const [patientIdInput, setPatientIdInput] = useState("");
   const [linkError, setLinkError] = useState("");
   const [linkLoading, setLinkLoading] = useState(false);
+  // After saving: prompt to link the new memory to another
+  const [pendingLinkMemory, setPendingLinkMemory] = useState<any | null>(null);
   const [formData, setFormData] = useState({
     people: "",
     occasion: "",
@@ -114,6 +116,24 @@ export default function FamilyDashboard() {
     }
   };
 
+  const linkMemory = async (newMemoryId: number, targetId: number) => {
+    // For stories: set linked_memory_id pointing to the photo
+    // For voice: set voice_sample_id on the target memories
+    const isVoice = pendingLinkMemory?.type === "voice";
+    const route = isVoice
+      ? `/api/memories/${targetId}/voice-sample`
+      : `/api/memories/${newMemoryId}/link`;
+    const body = isVoice
+      ? { voiceSampleId: newMemoryId }
+      : { linkedMemoryId: targetId };
+    await fetch(api(route), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    await fetchMemories();
+  };
+
   const onDrop = async (acceptedFiles: File[]) => {
     if (!auth.currentUser) {
       console.error("Please sign in to upload memories.");
@@ -165,10 +185,13 @@ export default function FamilyDashboard() {
       });
 
       if (!response.ok) throw new Error("Failed to save to database");
+      const saved = await response.json();
 
       await fetchMemories();
       setShowUploadModal(false);
       setFormData({ people: "", occasion: "", year: "", location: "", transcript: "" });
+      // Prompt linking only for stories and voice clips
+      if (uploadType === "story" || uploadType === "voice") setPendingLinkMemory(saved);
       console.log("Memory saved successfully!");
     } catch (error: any) {
       console.error("Detailed upload error:", error);
@@ -263,6 +286,13 @@ export default function FamilyDashboard() {
                       <ImageIcon size={12} />
                       <span>Photo</span>
                     </div>
+                    {/* Voice sample linked badge */}
+                    {memory.voice_sample_id && (
+                      <div className="absolute top-4 right-4 bg-ink/80 backdrop-blur-sm px-2 py-1 rounded-full text-xs flex items-center gap-1 text-bg">
+                        <Volume2 size={10} />
+                        <span>Voice linked</span>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="aspect-[4/3] bg-bg flex flex-col items-center justify-center relative gap-4">
@@ -278,12 +308,33 @@ export default function FamilyDashboard() {
                         </button>
                       </>
                     ) : (
-                      <FileText size={48} className="text-muted" />
+                      // Story: show linked photo if available
+                      memory.linked_memory_id ? (
+                        <div className="w-full h-full relative">
+                          <img
+                            src={memories.find(m => m.id === memory.linked_memory_id)?.file_url ?? ""}
+                            alt="Linked photo"
+                            className="w-full h-full object-cover opacity-60"
+                          />
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <FileText size={36} className="text-ink drop-shadow" />
+                          </div>
+                        </div>
+                      ) : (
+                        <FileText size={48} className="text-muted" />
+                      )
                     )}
                     <div className="absolute top-4 left-4 bg-surface/90 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1.5 text-ink">
                       {memory.type === "voice" ? <Mic size={12} /> : <FileText size={12} />}
                       <span className="capitalize">{memory.type}</span>
                     </div>
+                    {/* Link badge */}
+                    {memory.linked_memory_id && (
+                      <div className="absolute top-4 right-4 bg-ink/80 backdrop-blur-sm px-2 py-1 rounded-full text-xs flex items-center gap-1 text-bg">
+                        <Link2 size={10} />
+                        <span>Photo linked</span>
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className="p-6">
@@ -477,6 +528,87 @@ export default function FamilyDashboard() {
                     {uploading ? <Loader2 className="animate-spin" size={20} /> : <span>Save Story</span>}
                   </button>
                 )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* Link Picker Modal — shown after saving a story or voice clip */}
+      <AnimatePresence>
+        {pendingLinkMemory && (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setPendingLinkMemory(null)}
+              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white/75 dark:bg-white/10 backdrop-blur-md w-full sm:max-w-2xl rounded-t-[40px] sm:rounded-[40px] shadow-2xl dark:shadow-none relative z-10 overflow-y-auto max-h-[80vh] glass-border"
+            >
+              <div className="p-6 sm:p-8">
+                <div className="flex justify-between items-center mb-2">
+                  <h2 className="text-xl sm:text-2xl font-serif font-medium text-ink">
+                    {pendingLinkMemory.type === "voice" ? "Link voice to memories" : "Link story to a photo"}
+                  </h2>
+                  <button onClick={() => setPendingLinkMemory(null)} className="p-2 hover:bg-bg rounded-full transition-colors text-ink">
+                    <X size={20} />
+                  </button>
+                </div>
+                <p className="text-sm text-muted mb-6">
+                  {pendingLinkMemory.type === "voice"
+                    ? "Select the photos or stories this voice sample belongs to. The AI will use this voice when narrating those memories."
+                    : "Select a photo to pair with this story. It will appear as the story's cover image."}
+                </p>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {memories
+                    .filter(m => pendingLinkMemory.type === "voice" ? m.type !== "voice" : m.type === "photo")
+                    .map(m => {
+                      const isLinked = pendingLinkMemory.type === "voice"
+                        ? m.voice_sample_id === pendingLinkMemory.id
+                        : false;
+                      return (
+                        <button
+                          key={m.id}
+                          onClick={async () => {
+                            await linkMemory(pendingLinkMemory.id, m.id);
+                            if (pendingLinkMemory.type === "story") setPendingLinkMemory(null);
+                          }}
+                          className={cn(
+                            "relative rounded-2xl overflow-hidden border-2 transition-all text-left",
+                            isLinked ? "border-ink" : "border-border-color hover:border-muted"
+                          )}
+                        >
+                          {m.type === "photo" && m.file_url ? (
+                            <img src={m.file_url} alt={m.occasion} className="w-full aspect-square object-cover" />
+                          ) : (
+                            <div className="w-full aspect-square bg-surface flex items-center justify-center">
+                              <FileText size={28} className="text-muted" />
+                            </div>
+                          )}
+                          <div className="p-2">
+                            <p className="text-xs font-medium text-ink truncate">{m.occasion || m.type}</p>
+                            {m.year && <p className="text-[10px] text-muted">{m.year}</p>}
+                          </div>
+                          {isLinked && (
+                            <div className="absolute top-2 right-2 bg-ink rounded-full p-0.5">
+                              <Check size={10} className="text-bg" />
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                </div>
+
+                <button
+                  onClick={() => setPendingLinkMemory(null)}
+                  className="mt-6 w-full py-3 rounded-2xl border border-border-color text-sm text-muted hover:text-ink transition-colors"
+                >
+                  Skip for now
+                </button>
               </div>
             </motion.div>
           </div>

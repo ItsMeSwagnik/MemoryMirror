@@ -20,6 +20,7 @@ export default function App() {
   const [authError, setAuthError] = useState("");
   const [pendingView, setPendingView] = useState<"family" | "patient" | null>(null);
   const [selectedRole, setSelectedRole] = useState<"family" | "patient">("family");
+  const [userRole, setUserRole] = useState<"family" | "patient" | null>(null);
   const [theme, setTheme] = useState<"light" | "dark" | "system">(() => {
     return (localStorage.getItem("theme") as any) || "system";
   });
@@ -104,18 +105,19 @@ export default function App() {
   };
 
   const fetchUserRole = async (uid: string): Promise<"family" | "patient" | null> => {
-    // Check localStorage first (works without backend)
-    const cached = localStorage.getItem(`role_${uid}`);
-    if (cached === "family" || cached === "patient") return cached;
     try {
       const res = await fetch(api(`/api/user-role/${uid}`));
-      if (!res.ok) return null;
-      const data = await res.json();
-      if (data.role) localStorage.setItem(`role_${uid}`, data.role);
-      return data.role;
-    } catch {
-      return null;
-    }
+      if (res.ok) {
+        const data = await res.json();
+        if (data.role === "family" || data.role === "patient") {
+          localStorage.setItem(`role_${uid}`, data.role);
+          return data.role;
+        }
+      }
+    } catch { /* fall through to localStorage */ }
+    // Fallback: localStorage (offline / backend unavailable)
+    const cached = localStorage.getItem(`role_${uid}`);
+    return cached === "family" || cached === "patient" ? cached : null;
   };
 
   const saveUserRole = async (uid: string, role: "family" | "patient") => {
@@ -132,10 +134,17 @@ export default function App() {
   };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u ?? null);
+      if (u) {
+        const role = await fetchUserRole(u.uid);
+        setUserRole(role);
+      } else {
+        setUserRole(null);
+      }
     }, () => {
       setUser(null);
+      setUserRole(null);
     });
     return () => unsubscribe();
   }, []);
@@ -158,12 +167,10 @@ export default function App() {
       const result = await signInWithPopup(auth, provider);
       const uid = result.user.uid;
       const existingRole = await fetchUserRole(uid);
-      if (!existingRole) {
-        await saveUserRole(uid, selectedRole);
-        setView(selectedRole);
-      } else {
-        setView(existingRole);
-      }
+      const resolvedRole = existingRole || selectedRole;
+      if (!existingRole) await saveUserRole(uid, selectedRole);
+      setUserRole(resolvedRole);
+      setView(resolvedRole);
       setShowEmailAuth(false);
     } catch (error) {
       console.error("Login error:", error);
@@ -181,13 +188,17 @@ export default function App() {
         const result = await createUserWithEmailAndPassword(auth, email, password);
         await updateProfile(result.user, { displayName });
         await saveUserRole(result.user.uid, selectedRole);
+        setUserRole(selectedRole);
         setShowEmailAuth(false);
         setView(selectedRole);
       } else {
         const result = await signInWithEmailAndPassword(auth, email, password);
         const role = await fetchUserRole(result.user.uid);
+        const resolvedRole = role || selectedRole;
+        if (!role) await saveUserRole(result.user.uid, selectedRole);
+        setUserRole(resolvedRole);
         setShowEmailAuth(false);
-        setView(role || "family");
+        setView(resolvedRole);
       }
     } catch (error: any) {
       const code = error?.code ?? "";
@@ -563,7 +574,7 @@ export default function App() {
                 <h2 className="text-3xl font-serif font-medium mb-2">{user?.displayName || "Family Member"}</h2>
                 <p className="text-muted">{user?.email}</p>
                 <div className="mt-4 px-4 py-1.5 rounded-full bg-ink/5 text-xs font-bold uppercase tracking-widest">
-                  {localStorage.getItem(`role_${user?.uid}`) === "patient" ? "Patient Account" : "Family Account"}
+                  {userRole === "patient" ? "Patient Account" : "Family Account"}
                 </div>
               </div>
 

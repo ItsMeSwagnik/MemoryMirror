@@ -12,6 +12,9 @@ export default defineConfig({
   },
   server: {
     hmr: true,
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+    },
   },
   optimizeDeps: {
     exclude: ['omnivoice_service'],

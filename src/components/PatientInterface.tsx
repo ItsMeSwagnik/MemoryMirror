@@ -6,9 +6,10 @@ import { generateMemoryResponse, identifyPerson } from "../services/aiService";
 import { cn, api } from "../lib/utils";
 
 // ── Timeline card with scroll-triggered animation ──────────────────────────
-function TimelineCard({ memory, voiceMap, onNarrate, index, isLeft }: {
+function TimelineCard({ memory, voiceMap, voices, onNarrate, index, isLeft }: {
   memory: any;
   voiceMap: Record<string, string>;
+  voices: any[];
   onNarrate: (memory: any, voiceId?: string) => void;
   index: number;
   isLeft: boolean;
@@ -16,7 +17,13 @@ function TimelineCard({ memory, voiceMap, onNarrate, index, isLeft }: {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true, margin: "-60px" });
   const person = memory.people?.[0] ?? "Unknown";
-  const voiceId = voiceMap[person.toLowerCase()];
+  // Prefer voice_sample_id link over loose name match
+  const linkedVoice = memory.voice_sample_id
+    ? voices.find((v: any) => v.id === memory.voice_sample_id)
+    : null;
+  const voiceId = linkedVoice
+    ? voiceMap[linkedVoice.person_name?.toLowerCase()]
+    : voiceMap[person.toLowerCase()];
 
   return (
     <div ref={ref} className={cn("flex w-full items-start gap-4", isLeft ? "flex-row" : "flex-row-reverse")}>
@@ -70,10 +77,11 @@ function TimelineCard({ memory, voiceMap, onNarrate, index, isLeft }: {
 }
 
 // ── Person group on the timeline ─────────────────────────────────────────────
-function PersonTimeline({ person, memories, voiceMap, onNarrate, groupIndex }: {
+function PersonTimeline({ person, memories, voiceMap, voices, onNarrate, groupIndex }: {
   person: string;
   memories: any[];
   voiceMap: Record<string, string>;
+  voices: any[];
   onNarrate: (memory: any, voiceId?: string) => void;
   groupIndex: number;
 }) {
@@ -113,6 +121,7 @@ function PersonTimeline({ person, memories, voiceMap, onNarrate, groupIndex }: {
               key={m.id}
               memory={m}
               voiceMap={voiceMap}
+              voices={voices}
               onNarrate={onNarrate}
               index={i}
               isLeft={i % 2 === 0}
@@ -125,9 +134,10 @@ function PersonTimeline({ person, memories, voiceMap, onNarrate, groupIndex }: {
 }
 
 // ── Flashback overlay ───────────────────────────────────────────────────────
-function FlashbackOverlay({ memories, voiceMap, onDismiss }: {
+function FlashbackOverlay({ memories, voiceMap, voices, onDismiss }: {
   memories: any[];
   voiceMap: Record<string, string>;
+  voices: any[];
   onDismiss: () => void;
 }) {
   const sorted = [...memories].sort((a, b) => (a.year ?? 9999) - (b.year ?? 9999));
@@ -152,7 +162,12 @@ function FlashbackOverlay({ memories, voiceMap, onDismiss }: {
     setCaption("");
 
     const person = current.people?.[0] ?? null;
-    const voiceId = person ? voiceMap[person.toLowerCase()] : undefined;
+    const linkedVoice = current.voice_sample_id
+      ? voices.find((v: any) => v.id === current.voice_sample_id)
+      : null;
+    const voiceId = linkedVoice
+      ? voiceMap[linkedVoice.person_name?.toLowerCase()]
+      : (person ? voiceMap[person.toLowerCase()] : undefined);
     const text = current.transcript ||
       `A memory from ${current.year ?? "the past"}${
         current.occasion ? `, ${current.occasion}` : ""
@@ -164,6 +179,7 @@ function FlashbackOverlay({ memories, voiceMap, onDismiss }: {
 
     (async () => {
       try {
+        // 1. Server TTS
         const res = await fetch(api("/api/tts"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -171,6 +187,9 @@ function FlashbackOverlay({ memories, voiceMap, onDismiss }: {
         });
         if (cancelled) return;
         if (res.ok) {
+          const ct = res.headers.get("Content-Type") ?? "";
+          const provider = ct.includes("wav") ? "OmniVoice 🟢" : "ElevenLabs 🔵";
+          console.log(`%c[Flashback TTS] ${provider}${voiceId ? ` | voice: ${voiceId.slice(0,24)}…` : ""}`, "color:#6ee7b7;font-weight:bold");
           const blob = await res.blob();
           const url = URL.createObjectURL(blob);
           if (audioRef.current && !cancelled) {
@@ -184,7 +203,39 @@ function FlashbackOverlay({ memories, voiceMap, onDismiss }: {
               if (!cancelled) { setNarrating(false); advanceTimer.current = setTimeout(advance, 4000); }
             });
           }
-        } else {
+          return;
+        }
+
+        // 2. Client-side ElevenLabs
+        const clientElKey = import.meta.env.VITE_ELEVENLABS_API_KEY;
+        if (!cancelled && clientElKey && voiceId && !voiceId.startsWith("http")) {
+          const elRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "xi-api-key": clientElKey },
+            body: JSON.stringify({ text, model_id: "eleven_turbo_v2", voice_settings: { stability: 0.5, similarity_boost: 0.75 } }),
+          });
+          if (!cancelled && elRes.ok) {
+            console.log(`%c[Flashback TTS] ElevenLabs (client-side) 🔵 | voice: ${voiceId?.slice(0,24)}…`, "color:#93c5fd;font-weight:bold");
+            const blob = await elRes.blob();
+            const url = URL.createObjectURL(blob);
+            if (audioRef.current && !cancelled) {
+              audioRef.current.src = url;
+              audioRef.current.onended = () => {
+                if (cancelled) return;
+                setNarrating(false);
+                advanceTimer.current = setTimeout(advance, 2800);
+              };
+              audioRef.current.play().catch(() => {
+                if (!cancelled) { setNarrating(false); advanceTimer.current = setTimeout(advance, 4000); }
+              });
+            }
+            return;
+          }
+        }
+
+        // 3. Browser fallback
+        if (!cancelled) {
+          console.log("%c[Flashback TTS] Browser Speech Synthesis 🟡 (fallback)", "color:#fcd34d;font-weight:bold");
           const utt = new SpeechSynthesisUtterance(text);
           utt.rate = 0.88; utt.pitch = 1.05;
           utt.onend = () => { if (!cancelled) { setNarrating(false); advanceTimer.current = setTimeout(advance, 2800); } };
@@ -379,12 +430,16 @@ export default function PatientInterface({ patientName }: { patientName: string 
         memoriesRef.current = data;
         const firstPhoto = data.find((m: any) => m.type === "photo");
         if (firstPhoto) setCurrentPhoto(firstPhoto.file_url);
+        if (data.length === 0) {
+          setAiResponse(`Hello ${patientName}. I don't have any memories yet. Ask your family to upload some photos and stories so we can remember together.`);
+        }
       }
       if (voiceRes.ok) {
         setVoices(await voiceRes.json());
       }
     } catch (error) {
       console.error("Failed to fetch memories:", error);
+      setAiResponse(`Hello ${patientName}. I couldn't fetch your memories right now. Please check your connection.`);
     }
   };
 
@@ -410,6 +465,13 @@ export default function PatientInterface({ patientName }: { patientName: string 
     setNarratingId(memory.id);
     setActiveTab("companion");
     if (memory.type === "photo" && memory.file_url) setCurrentPhoto(memory.file_url);
+    // If this memory has a directly linked voice sample, prefer it
+    const linkedVoice = memory.voice_sample_id
+      ? voices.find((v: any) => v.id === memory.voice_sample_id)
+      : null;
+    const resolvedVoiceId = linkedVoice
+      ? voiceMap[linkedVoice.person_name?.toLowerCase()]
+      : voiceId;
     const text = memory.transcript ||
       `This is a ${memory.type} memory from ${memory.year ?? "the past"}${
         memory.occasion ? ` — ${memory.occasion}` : ""
@@ -420,32 +482,60 @@ export default function PatientInterface({ patientName }: { patientName: string 
       }.`;
     setAiResponse(text);
     setLastInputMethod("text");
-    await speakWithVoice(text, voiceId);
+    await speakWithVoice(text, resolvedVoiceId);
     setNarratingId(null);
+  };
+
+  const playAudioBlob = (blob: Blob, wasListening: boolean, text: string) => {
+    const url = URL.createObjectURL(blob);
+    if (voiceAudioRef.current) {
+      voiceAudioRef.current.src = url;
+      voiceAudioRef.current.onended = () => { if (wasListening) { try { recognitionRef.current?.start(); } catch (e) {} } };
+      voiceAudioRef.current.play().catch(() => fallbackSpeak(text, wasListening));
+    }
   };
 
   const speakWithVoice = async (text: string, voiceId?: string) => {
     if (!text) return;
     const wasListening = isListeningRef.current;
     if (wasListening) { try { recognitionRef.current?.stop(); } catch (e) {} }
+    if (voiceAudioRef.current) { voiceAudioRef.current.pause(); voiceAudioRef.current.src = ""; }
+    window.speechSynthesis.cancel();
+
+    // 1. Try server TTS (OmniVoice → ElevenLabs chain)
     try {
-      if (voiceAudioRef.current) { voiceAudioRef.current.pause(); voiceAudioRef.current.src = ""; }
-      window.speechSynthesis.cancel();
       const response = await fetch(api("/api/tts"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, voiceId }),
       });
       if (response.ok) {
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        if (voiceAudioRef.current) {
-          voiceAudioRef.current.src = url;
-          voiceAudioRef.current.onended = () => { if (wasListening) { try { recognitionRef.current?.start(); } catch (e) {} } };
-          voiceAudioRef.current.play().catch(() => fallbackSpeak(text, wasListening));
+        const ct = response.headers.get("Content-Type") ?? "";
+        const provider = ct.includes("wav") ? "OmniVoice 🟢" : "ElevenLabs 🔵";
+        console.log(`%c[TTS] ${provider}${voiceId ? ` | voice: ${voiceId.slice(0,24)}…` : " | no voice clone"}`, "color:#6ee7b7;font-weight:bold");
+        playAudioBlob(await response.blob(), wasListening, text); return;
+      }
+    } catch { /* fall through */ }
+
+    // 2. Try ElevenLabs directly from client (works on Vercel where server has no backend)
+    const clientElKey = import.meta.env.VITE_ELEVENLABS_API_KEY;
+    if (clientElKey && voiceId && !voiceId.startsWith("http")) {
+      try {
+        const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "xi-api-key": clientElKey },
+          body: JSON.stringify({ text, model_id: "eleven_turbo_v2", voice_settings: { stability: 0.5, similarity_boost: 0.75 } }),
+        });
+        if (res.ok) {
+          console.log(`%c[TTS] ElevenLabs (client-side) 🔵 | voice: ${voiceId.slice(0,24)}…`, "color:#93c5fd;font-weight:bold");
+          playAudioBlob(await res.blob(), wasListening, text); return;
         }
-      } else { fallbackSpeak(text, wasListening); }
-    } catch { fallbackSpeak(text, wasListening); }
+      } catch { /* fall through */ }
+    }
+
+    // 3. Browser speech synthesis
+    console.log("%c[TTS] Browser Speech Synthesis 🟡 (fallback)", "color:#fcd34d;font-weight:bold");
+    fallbackSpeak(text, wasListening);
   };
 
   useEffect(() => {
@@ -517,14 +607,22 @@ export default function PatientInterface({ patientName }: { patientName: string 
   useEffect(() => {
     const idleInterval = setInterval(() => {
       const idleTime = Date.now() - lastInteractionRef.current;
-      if (idleTime > 60000 && memoriesRef.current.length > 0 && !flashbackActive) {
+      const hasRealMemories = memoriesRef.current.some(
+        (m: any) => m.transcript || m.file_url
+      );
+      if (idleTime > 60000 && hasRealMemories && !flashbackActive) {
         setFlashbackActive(true);
       }
     }, 10000);
     return () => clearInterval(idleInterval);
   }, [flashbackActive]);
 
+  const voiceInputTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleVoiceInput = async (text: string) => {
+    // Debounce: cancel previous pending call if user is still speaking
+    if (voiceInputTimer.current) clearTimeout(voiceInputTimer.current);
+    voiceInputTimer.current = setTimeout(async () => {
     lastInteractionRef.current = Date.now();
     setIsThinking(true);
     const currentMemories = memoriesRef.current;
@@ -546,6 +644,7 @@ export default function PatientInterface({ patientName }: { patientName: string 
     } finally {
       setIsThinking(false);
     }
+    }, 800); // wait 800ms after last word before firing
   };
 
   const speak = (text: string) => speakWithVoice(text);
@@ -692,6 +791,7 @@ export default function PatientInterface({ patientName }: { patientName: string 
                   person={person}
                   memories={mems}
                   voiceMap={voiceMap}
+                  voices={voices}
                   onNarrate={narrateMemory}
                   groupIndex={gi}
                 />
@@ -907,6 +1007,7 @@ export default function PatientInterface({ patientName }: { patientName: string 
           <FlashbackOverlay
             memories={memories}
             voiceMap={voiceMap}
+            voices={voices}
             onDismiss={dismissFlashback}
           />
         )}

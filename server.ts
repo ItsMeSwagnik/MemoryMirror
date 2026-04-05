@@ -49,7 +49,8 @@ async function query(text: string, params?: any[]): Promise<{ rows: any[] }> {
   }
   if (t.startsWith("INSERT INTO USERS")) {
     const [uid, role] = params || [];
-    if (!memStore.users.find(u => u.uid === uid)) memStore.users.push({ uid, role, linked_patient_id: null });
+    const existing = memStore.users.find(u => u.uid === uid);
+    if (!existing) memStore.users.push({ uid, role, linked_patient_id: null });
     return { rows: [] };
   }
   if (t.startsWith("UPDATE USERS SET LINKED_PATIENT_ID")) {
@@ -66,7 +67,7 @@ async function query(text: string, params?: any[]): Promise<{ rows: any[] }> {
   }
   if (t.startsWith("INSERT INTO MEMORIES")) {
     const [type, file_url, transcript, people, occasion, year, location, author_id, patient_id] = params || [];
-    const row = { id: memStore.nextId++, type, file_url, transcript, people, occasion, year, location, author_id, patient_id, created_at: new Date() };
+    const row = { id: memStore.nextId++, type, file_url, transcript, people, occasion, year, location, author_id, patient_id, linked_memory_id: null, voice_sample_id: null, created_at: new Date() };
     memStore.memories.push(row);
     return { rows: [row] };
   }
@@ -102,24 +103,30 @@ async function initDb() {
         location TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         author_id TEXT NOT NULL,
-        patient_id TEXT NOT NULL
-      );
-
+        patient_id TEXT NOT NULL,
+        linked_memory_id INTEGER,
+        voice_sample_id INTEGER
+      )
+    `);
+    await query(`
       CREATE TABLE IF NOT EXISTS people_voices (
         id SERIAL PRIMARY KEY,
         person_name TEXT UNIQUE NOT NULL,
         voice_id TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
+      )
+    `);
+    await query(`
       CREATE TABLE IF NOT EXISTS users (
         uid TEXT PRIMARY KEY,
         role TEXT NOT NULL CHECK (role IN ('family', 'patient')),
         linked_patient_id TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS linked_patient_id TEXT;
+      )
     `);
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS linked_patient_id TEXT`);
+    await query(`ALTER TABLE memories ADD COLUMN IF NOT EXISTS linked_memory_id INTEGER`);
+    await query(`ALTER TABLE memories ADD COLUMN IF NOT EXISTS voice_sample_id INTEGER`);
     console.log("Database initialized");
   } catch (err: any) {
     console.error("Database initialization error:", err.message);
@@ -131,12 +138,6 @@ async function startServer() {
   const PORT = 4000;
 
   app.use(express.json());
-
-  // Fix COOP to allow Firebase Google sign-in popup
-  app.use((_req, res, next) => {
-    res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
-    next();
-  });
 
   // User role routes
   app.get("/api/user-role/:uid", async (req, res) => {
@@ -233,11 +234,11 @@ async function startServer() {
         return res.status(r.status).json({ error: "OmniVoice clone error", detail: err });
       }
       const { voice_id } = await r.json();
-      // Store in DB same as ElevenLabs clones
       await query(
         "INSERT INTO people_voices (person_name, voice_id) VALUES ($1, $2) ON CONFLICT (person_name) DO UPDATE SET voice_id = $2",
         [name, voice_id]
       );
+      console.log(`[Voice Clone] OmniVoice ✅ | person: ${name} | voice_id: ${voice_id}`);
       res.json({ voiceId: voice_id, name, provider: "omnivoice" });
     } catch (err: any) {
       res.status(503).json({ error: "OmniVoice unavailable", detail: err.message });
@@ -259,6 +260,7 @@ async function startServer() {
           body: JSON.stringify({ text, ref_audio_url: ref ?? null }),
         });
         if (r.ok) {
+          console.log(`[TTS] OmniVoice ✅ | voice: ${ref ?? "auto"}`);
           const buf = await r.arrayBuffer();
           res.set("Content-Type", "audio/wav");
           return res.send(Buffer.from(buf));
@@ -281,18 +283,20 @@ async function startServer() {
           }),
         });
         if (response.ok) {
+          console.log(`[TTS] ElevenLabs ✅ | voice: ${elevenLabsVoiceId}`);
           const buf = await response.arrayBuffer();
           res.set("Content-Type", "audio/mpeg");
           return res.send(Buffer.from(buf));
         }
         if (response.status === 402) {
-          console.warn("ElevenLabs quota exceeded, falling back to browser TTS");
+          console.warn("[TTS] ElevenLabs quota exceeded, falling back to browser TTS");
           return res.status(402).json({ error: "ElevenLabs quota exceeded" });
         }
       } catch { /* fall through */ }
     }
 
     // 3. No TTS available — client will use browser speech synthesis
+    console.warn("[TTS] No provider available — client will use browser fallback");
     res.status(404).json({ error: "No TTS provider available" });
   });
 
@@ -331,10 +335,32 @@ async function startServer() {
         "INSERT INTO people_voices (person_name, voice_id) VALUES ($1, $2) ON CONFLICT (person_name) DO UPDATE SET voice_id = $2",
         [name, voice_id]
       );
-
+      console.log(`[Voice Clone] ElevenLabs ✅ | person: ${name} | voice_id: ${voice_id}`);
       res.json({ voiceId: voice_id, name });
     } catch (err: any) {
       console.error("Voice cloning error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Link a story/photo to another memory
+  app.patch("/api/memories/:id/link", async (req, res) => {
+    try {
+      const { linkedMemoryId } = req.body;
+      await query("UPDATE memories SET linked_memory_id = $1 WHERE id = $2", [linkedMemoryId ?? null, req.params.id]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Link a voice sample to a memory
+  app.patch("/api/memories/:id/voice-sample", async (req, res) => {
+    try {
+      const { voiceSampleId } = req.body;
+      await query("UPDATE memories SET voice_sample_id = $1 WHERE id = $2", [voiceSampleId ?? null, req.params.id]);
+      res.json({ success: true });
+    } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });

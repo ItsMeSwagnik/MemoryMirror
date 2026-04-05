@@ -57,7 +57,7 @@ async function query(text: string, params?: any[]): Promise<{ rows: any[] }> {
   }
   if (t.startsWith("INSERT INTO MEMORIES")) {
     const [type, file_url, transcript, people, occasion, year, location, author_id, patient_id] = params || [];
-    const row = { id: memStore.nextId++, type, file_url, transcript, people, occasion, year, location, author_id, patient_id, created_at: new Date() };
+    const row = { id: memStore.nextId++, type, file_url, transcript, people, occasion, year, location, author_id, patient_id, linked_memory_id: null, voice_sample_id: null, created_at: new Date() };
     memStore.memories.push(row);
     return { rows: [row] };
   }
@@ -90,7 +90,9 @@ async function initDb() {
         location TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         author_id TEXT NOT NULL,
-        patient_id TEXT NOT NULL
+        patient_id TEXT NOT NULL,
+        linked_memory_id INTEGER,
+        voice_sample_id INTEGER
       );
       CREATE TABLE IF NOT EXISTS people_voices (
         id SERIAL PRIMARY KEY,
@@ -105,6 +107,8 @@ async function initDb() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
       ALTER TABLE users ADD COLUMN IF NOT EXISTS linked_patient_id TEXT;
+      ALTER TABLE memories ADD COLUMN IF NOT EXISTS linked_memory_id INTEGER;
+      ALTER TABLE memories ADD COLUMN IF NOT EXISTS voice_sample_id INTEGER;
     `);
   } catch (err: any) {
     console.error("DB init error:", err.message);
@@ -220,6 +224,28 @@ app.post("/api/clone-voice", async (req, res) => {
       [name, voice_id]
     );
     res.json({ voiceId: voice_id, name });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Link a story/photo to another memory
+app.patch("/api/memories/:id/link", async (req, res) => {
+  try {
+    const { linkedMemoryId } = req.body;
+    await query("UPDATE memories SET linked_memory_id = $1 WHERE id = $2", [linkedMemoryId ?? null, req.params.id]);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Link a voice sample to a memory
+app.patch("/api/memories/:id/voice-sample", async (req, res) => {
+  try {
+    const { voiceSampleId } = req.body;
+    await query("UPDATE memories SET voice_sample_id = $1 WHERE id = $2", [voiceSampleId ?? null, req.params.id]);
+    res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

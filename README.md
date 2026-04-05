@@ -13,6 +13,8 @@ MemoryMirror is an AI-powered memory companion for dementia patients. Families u
 - **AI Memory Companion** — Patient talks to an AI that responds using *only* their real uploaded memories (powered by OpenRouter)
 - **Smart Voice Selection** — AI automatically identifies which person a memory is about and narrates in their cloned voice
 - **Memory Timeline** — Animated, scrollable timeline grouped by person showing all uploaded photos, stories, and voice memories sorted by year — tap any card to narrate it in that person's cloned voice
+- **Memory Linking** — Stories and voice clips can be explicitly linked to photos; linked photos appear as story cover images and the correct voice plays automatically when narrating
+- **Voice-to-Memory Linking** — Voice samples are linked directly to specific memories so the AI always narrates in the exact right voice, even if names don't match
 - **Voice Cloning** — Loved ones' voices are cloned via ElevenLabs so the companion speaks in a familiar voice
 - **Face Recognition** — Camera mode lets the patient ask "Who is this?" and the AI identifies people from memory context
 - **Flashback Mode** — After 60 seconds of idle, a cinematic fullscreen experience auto-plays all memories chronologically: Ken Burns photo transitions, year/occasion overlays, and each memory narrated in the person's cloned voice with a live waveform — tap anywhere to return
@@ -34,10 +36,11 @@ MemoryMirror is an AI-powered memory companion for dementia patients. Families u
 | Database | Neon PostgreSQL (serverless) |
 | File Storage | Cloudinary (free tier) |
 | Auth | Firebase Authentication |
-| AI (Chat) | OpenRouter API (`mistralai/mistral-small-3.1-24b-instruct:free`) |
-| AI (Vision) | OpenRouter API (`meta-llama/llama-3.2-11b-vision-instruct:free`) |
+| AI (Chat) | OpenRouter API (`google/gemma-3-12b-it:free`) |
+| AI (Vision) | OpenRouter API (`google/gemma-3-12b-it:free`) |
 | AI (TTS) | OmniVoice (Python microservice) → ElevenLabs API → Browser Speech Synthesis fallback |
 | Voice Cloning | OmniVoice zero-shot cloning → ElevenLabs Voice Cloning API fallback |
+| Deployment | Vercel (serverless via `api/index.ts`) + local Express (`server.ts`) |
 
 ---
 
@@ -45,6 +48,8 @@ MemoryMirror is an AI-powered memory companion for dementia patients. Families u
 
 ```
 MemoryMirror/
+├── api/
+│   └── index.ts                  # Vercel serverless handler (same API routes, no OmniVoice proxy)
 ├── src/
 │   ├── components/
 │   │   ├── FamilyDashboard.tsx   # Memory upload UI, voice cloning panel, patient linking
@@ -56,15 +61,15 @@ MemoryMirror/
 │   │   ├── utils.ts
 │   │   └── errorHandlers.ts
 │   ├── App.tsx                   # Landing page, auth, routing, theme
-│   ├── firebase.ts               # Firebase init (auth only)
+│   ├── firebase.ts               # Firebase init (auth only, config via VITE_FIREBASE_* env vars)
 │   ├── main.tsx
 │   └── index.css                 # CSS variables, glassmorphism, glow orb animations
-├── omnivoice_service/            # Python microservice for zero-shot voice cloning (planned)
-├── server.ts                     # Express server + Neon DB + API routes
+├── omnivoice_service/            # Python microservice for zero-shot voice cloning
+├── server.ts                     # Express server + Neon DB + API routes (local dev)
+├── vercel.json                   # Vercel deployment config
 ├── vite.config.ts
 ├── .env.local                    # Your secret keys (never commit this)
-├── .env.example                  # Template for required env vars
-└── firebase-applet-config.json   # Firebase project config (never commit this)
+└── .env.example                  # Template for required env vars
 ```
 
 ---
@@ -115,7 +120,7 @@ App runs at **http://localhost:4000**
 1. Go to [openrouter.ai](https://openrouter.ai) and create a free account
 2. Go to **Keys** → **Create Key**
 3. Paste into both `OPENROUTER_API_KEY` and `VITE_OPENROUTER_API_KEY` in `.env.local`
-> Uses `mistralai/mistral-small-3.1-24b-instruct:free` for chat and `meta-llama/llama-3.2-11b-vision-instruct:free` for vision — no credit card needed
+> Uses `google/gemma-3-12b-it:free` for both chat and vision — no credit card needed
 
 ### ElevenLabs (Voice Cloning + TTS)
 1. Go to [elevenlabs.io](https://elevenlabs.io) and sign up
@@ -124,7 +129,10 @@ App runs at **http://localhost:4000**
 > If not set, the app falls back to browser speech synthesis — it always works.
 
 ### Firebase (Auth)
-The Firebase config lives in `firebase-applet-config.json` (gitignored). Auth (Google + Email) works out of the box. Make sure `localhost` is added to **Firebase Console → Authentication → Authorized domains**.
+1. Go to [console.firebase.google.com](https://console.firebase.google.com) and create a project
+2. Enable **Authentication** → **Sign-in method** → Google + Email/Password
+3. Copy the config values from **Project Settings → Your apps** into `.env.local` as `VITE_FIREBASE_*` variables (see `.env.example`)
+4. Make sure `localhost` (and your Vercel domain) is added to **Authentication → Authorized domains**
 
 ---
 
@@ -135,9 +143,11 @@ The Firebase config lives in `firebase-applet-config.json` (gitignored). Auth (G
 2. Copy the patient's UID from their companion screen and paste it into the **Link Patient** panel
 3. Click **Add New Memory** → choose Photo, Voice, or Story
 4. Tag the memory: who's in it, occasion, year, location
-5. Upload the file (stored in Cloudinary)
+5. Upload the file — photos and voice clips go to Cloudinary; stories are text-only and saved directly to Neon DB
 6. For voice clips: click **Clone Voice** to create an ElevenLabs voice clone for that person
-7. All metadata is saved to Neon PostgreSQL, linked to the patient's UID
+7. After saving a **story**, a link picker appears — select a photo to pair with it (shows as the story's cover image)
+8. After saving a **voice clip**, a link picker appears — select the photos/stories this voice belongs to so the AI always uses the right voice when narrating those memories
+9. All metadata (including `linked_memory_id` and `voice_sample_id`) is saved to Neon PostgreSQL, linked to the patient's UID
 
 ### Patient Flow
 1. Sign in → **Patient Companion**
@@ -161,11 +171,15 @@ The Firebase config lives in `firebase-applet-config.json` (gitignored). Auth (G
 | `POST` | `/api/memories` | Save a new memory with tags |
 | `GET` | `/api/voices` | Fetch all cloned voice profiles |
 | `POST` | `/api/clone-voice` | Clone a voice via ElevenLabs |
-| `POST` | `/api/tts` | Text-to-speech proxy via ElevenLabs (accepts optional `voiceId`) |
+| `POST` | `/api/tts` | TTS proxy — OmniVoice → ElevenLabs → 404 (client falls back to browser) |
+| `POST` | `/api/omnivoice-tts` | Direct OmniVoice TTS proxy (local dev only) |
+| `POST` | `/api/omnivoice-clone` | OmniVoice voice clone proxy (local dev only) |
 | `GET` | `/api/user-role/:uid` | Get a user's role (family / patient) |
 | `POST` | `/api/user-role` | Save a user's role on first sign-in |
 | `GET` | `/api/link-patient/:uid` | Get the patient linked to a family member |
 | `POST` | `/api/link-patient` | Link a family member to a patient UID |
+| `PATCH` | `/api/memories/:id/link` | Link a story/photo to another memory (`linked_memory_id`) |
+| `PATCH` | `/api/memories/:id/voice-sample` | Link a voice sample to a memory (`voice_sample_id`) |
 
 ---
 
@@ -188,7 +202,9 @@ The Firebase config lives in `firebase-applet-config.json` (gitignored). Auth (G
 | ✅ | Family ↔ Patient account linking via UID |
 | ✅ | Glassmorphism UI with responsive layout |
 | ✅ | Dark / Light / System theme |
-| 🔜 | OmniVoice zero-shot voice cloning (600+ languages, Python microservice) |
+| ✅ | OmniVoice zero-shot voice cloning (600+ languages, Python microservice — local dev) |
+| ✅ | Memory linking — stories paired to photos, voice samples linked to specific memories |
+| ✅ | Precise voice resolution via `voice_sample_id` — correct voice plays even without name match |
 | 🔜 | Whisper transcription on voice upload |
 | 🔜 | Emotion detection from voice tone |
 | 🔜 | Mobile PWA support |
@@ -201,28 +217,35 @@ The Firebase config lives in `firebase-applet-config.json` (gitignored). Auth (G
 - The AI response includes a `SPEAKER:` tag that the app uses to automatically select the right cloned voice — no manual selection needed
 - Flashback Mode triggers after 60s of inactivity — it walks through all memories sorted by year, narrating each in the tagged person's cloned voice with Ken Burns photo animations and progress dots; tapping anywhere dismisses it and resets the idle timer
 - Voice cloning uses the ElevenLabs Instant Voice Cloning API — upload a voice clip in the Family Dashboard and click **Clone Voice**
+- Stories are text-only — no file is uploaded to Cloudinary; the story text lives in the `transcript` column of the `memories` table in Neon
+- `linked_memory_id` on a story row points to its paired photo memory; `voice_sample_id` on any memory row points to the voice clip that should narrate it — both are set via the post-save link picker in the Family Dashboard
+- Voice resolution priority when narrating: `voice_sample_id` direct link → loose `voiceMap` name match → browser speech synthesis
 - The in-memory store fallback means the app works even without a database connection, great for demos
 - All modals and cards use glassmorphism (`backdrop-blur-md` + semi-transparent background) with CSS variable-driven theming
+- On Vercel, the Express server is replaced by `api/index.ts` (serverless). OmniVoice proxy routes are only available in local dev via `server.ts`
+- Firebase config is loaded entirely from `VITE_FIREBASE_*` environment variables — no `firebase-applet-config.json` needed
+- Set `VITE_ELEVENLABS_API_KEY` (same value as `ELEVENLABS_API_KEY`) for client-side TTS fallback on Vercel where there's no Express backend
+- Set `VITE_API_BASE` to your deployed backend URL on Vercel if you run Express separately (e.g. Railway/Render); leave empty for local dev
 
 ---
 
-## 🤖 OmniVoice Microservice (Planned)
+## 🤖 OmniVoice Microservice
 
 FastAPI wrapper around OmniVoice — zero-shot multilingual TTS + voice cloning. Runs on **http://localhost:8000** alongside the main Express server.
 
 ### Setup
 
-**Prerequisites:** Python 3.10+, GPU recommended (NVIDIA CUDA or Apple Silicon MPS — CPU works but ~40x slower)
+**Prerequisites:** Python 3.12+, GPU recommended (NVIDIA CUDA or Apple Silicon MPS — CPU works but ~40x slower)
 
 ```bat
 cd omnivoice_service
-setup.bat   # creates venv, installs deps
+setup.bat   # creates venv, installs PyTorch 2.7 + OmniVoice
 start.bat   # first run downloads model from HuggingFace (~2–4 GB)
 ```
 
-For NVIDIA GPU, replace the PyTorch step in setup with:
+For Apple Silicon, replace the PyTorch install line in `setup.bat` with:
 ```bat
-pip install torch==2.1.0+cu121 torchaudio==2.1.0+cu121 --extra-index-url https://download.pytorch.org/whl/cu121
+venv\Scripts\pip install torch torchaudio
 ```
 
 ### OmniVoice API Routes
