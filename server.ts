@@ -189,7 +189,7 @@ async function startServer() {
     }
   });
 
-  const OMNIVOICE_URL = "http://localhost:8000";
+  const OMNIVOICE_URL = (process.env.OMNIVOICE_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
   // Check if OmniVoice microservice is running
   async function omnivoiceAvailable(): Promise<boolean> {

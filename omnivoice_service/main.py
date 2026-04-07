@@ -18,6 +18,7 @@ from typing import Optional
 import torch
 import torchaudio
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -37,6 +38,14 @@ CACHE_DIR = Path(tempfile.gettempdir()) / "omnivoice_refs"
 CACHE_DIR.mkdir(exist_ok=True)
 
 app = FastAPI(title="OmniVoice Microservice")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ---------------------------------------------------------------------------
 # Helpers

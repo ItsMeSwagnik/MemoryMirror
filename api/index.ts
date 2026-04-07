@@ -115,6 +115,16 @@ async function initDb() {
   }
 }
 
+const OMNIVOICE_URL = (process.env.OMNIVOICE_URL ?? "").replace(/\/$/, "");
+
+async function omnivoiceAvailable(): Promise<boolean> {
+  if (!OMNIVOICE_URL) return false;
+  try {
+    const r = await fetch(`${OMNIVOICE_URL}/health`, { signal: AbortSignal.timeout(3000) });
+    return r.ok;
+  } catch { return false; }
+}
+
 const app = express();
 app.use(express.json());
 
@@ -162,33 +172,70 @@ app.post("/api/link-patient", async (req, res) => {
 });
 
 app.post("/api/tts", async (req, res) => {
-  try {
-    const { text, voiceId } = req.body;
-    const apiKey = process.env.ELEVENLABS_API_KEY;
-    if (!apiKey) return res.status(404).json({ error: "API key not set" });
+  const { text, voiceId, refAudioUrl } = req.body;
 
-    const selectedVoiceId = voiceId || "21m00Tcm4TlvDq8ikWAM";
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${selectedVoiceId}`, {
+  // 1. Try OmniVoice via ngrok (if OMNIVOICE_URL is set)
+  if (await omnivoiceAvailable()) {
+    try {
+      const ref = refAudioUrl || (voiceId?.startsWith("http") ? voiceId : null);
+      const r = await fetch(`${OMNIVOICE_URL}/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, ref_audio_url: ref ?? null }),
+      });
+      if (r.ok) {
+        const buf = await r.arrayBuffer();
+        res.set("Content-Type", "audio/wav");
+        return res.send(Buffer.from(buf));
+      }
+    } catch { /* fall through */ }
+  }
+
+  // 2. ElevenLabs
+  try {
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    if (!apiKey) return res.status(404).json({ error: "No TTS provider available" });
+    const elevenLabsVoiceId = voiceId && !voiceId.startsWith("http") ? voiceId : "21m00Tcm4TlvDq8ikWAM";
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${elevenLabsVoiceId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "xi-api-key": apiKey },
-      body: JSON.stringify({
-        text,
-        model_id: "eleven_multilingual_v2",
-        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-      }),
+      body: JSON.stringify({ text, model_id: "eleven_multilingual_v2", voice_settings: { stability: 0.5, similarity_boost: 0.75 } }),
     });
-
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       if (response.status === 402) return res.status(402).json({ error: "ElevenLabs Quota Exceeded", details: errorData });
       throw new Error(`ElevenLabs API error: ${response.status}`);
     }
-
     const arrayBuffer = await response.arrayBuffer();
     res.set("Content-Type", "audio/mpeg");
-    res.send(Buffer.from(arrayBuffer));
+    return res.send(Buffer.from(arrayBuffer));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// OmniVoice clone proxy (Vercel → ngrok)
+app.post("/api/omnivoice-clone", async (req, res) => {
+  if (!OMNIVOICE_URL) return res.status(503).json({ error: "OMNIVOICE_URL not set" });
+  try {
+    const { name, sampleUrl } = req.body;
+    const r = await fetch(`${OMNIVOICE_URL}/clone`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, sample_url: sampleUrl }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      return res.status(r.status).json({ error: "OmniVoice clone error", detail: err });
+    }
+    const { voice_id } = await r.json();
+    await query(
+      "INSERT INTO people_voices (person_name, voice_id) VALUES ($1, $2) ON CONFLICT (person_name) DO UPDATE SET voice_id = $2",
+      [name, voice_id]
+    );
+    res.json({ voiceId: voice_id, name, provider: "omnivoice" });
+  } catch (err: any) {
+    res.status(503).json({ error: "OmniVoice unavailable", detail: err.message });
   }
 });
 

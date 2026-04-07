@@ -274,7 +274,7 @@ export default function App() {
                   className="w-8 h-8 rounded-full bg-surface border border-border-color flex items-center justify-center overflow-hidden"
                 >
                   {user.photoURL ? (
-                    <img src={user.photoURL} alt="Profile" className="w-full h-full object-cover" />
+                    <img src={user.photoURL} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                   ) : (
                     <User size={16} />
                   )}
@@ -566,7 +566,7 @@ export default function App() {
               <div className="flex flex-col items-center text-center mb-12">
                 <div className="w-32 h-32 rounded-full bg-bg border-4 border-surface shadow-xl mb-6 overflow-hidden flex items-center justify-center">
                   {user?.photoURL ? (
-                    <img src={user.photoURL} alt="Profile" className="w-full h-full object-cover" />
+                    <img src={user.photoURL} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                   ) : (
                     <User size={64} className="text-muted" />
                   )}

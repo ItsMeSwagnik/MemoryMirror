@@ -222,7 +222,7 @@ App runs at **http://localhost:4000**
 - Voice resolution priority when narrating: `voice_sample_id` direct link → loose `voiceMap` name match → browser speech synthesis
 - The in-memory store fallback means the app works even without a database connection, great for demos
 - All modals and cards use glassmorphism (`backdrop-blur-md` + semi-transparent background) with CSS variable-driven theming
-- On Vercel, the Express server is replaced by `api/index.ts` (serverless). OmniVoice proxy routes are only available in local dev via `server.ts`
+- On Vercel, the Express server is replaced by `api/index.ts` (serverless). Set `OMNIVOICE_URL` to your ngrok tunnel URL in Vercel env vars to enable OmniVoice — otherwise it falls back to ElevenLabs automatically
 - Firebase config is loaded entirely from `VITE_FIREBASE_*` environment variables — no `firebase-applet-config.json` needed
 - Set `VITE_ELEVENLABS_API_KEY` (same value as `ELEVENLABS_API_KEY`) for client-side TTS fallback on Vercel where there's no Express backend
 - Set `VITE_API_BASE` to your deployed backend URL on Vercel if you run Express separately (e.g. Railway/Render); leave empty for local dev
@@ -231,17 +231,62 @@ App runs at **http://localhost:4000**
 
 ## 🤖 OmniVoice Microservice
 
-FastAPI wrapper around OmniVoice — zero-shot multilingual TTS + voice cloning. Runs on **http://localhost:8000** alongside the main Express server.
+FastAPI wrapper around OmniVoice — zero-shot multilingual TTS + voice cloning. Runs on your local machine and is exposed to Vercel via an **ngrok tunnel**.
+
+### Architecture
+
+```
+Frontend (Vercel)
+      ↓
+Node.js Backend (Vercel api/index.ts)
+      ↓
+ngrok public URL  (https://xxx.ngrok-free.app)
+      ↓
+Your Laptop  (FastAPI + GPU + OmniVoice  →  localhost:8000)
+```
+
+### ngrok Setup (Windows)
+
+1. Go to [ngrok.com/download](https://ngrok.com/download) → download **Windows (zip)** → extract `ngrok.exe` to `C:\ngrok`
+2. Add `C:\ngrok` to **System Environment Variables → Path**
+3. Sign up at [ngrok.com](https://ngrok.com) → Dashboard → copy your **Authtoken**
+4. Run once in any terminal:
+```bat
+ngrok config add-authtoken YOUR_TOKEN_HERE
+```
 
 ### Setup
 
 **Prerequisites:** Python 3.12+, GPU recommended (NVIDIA CUDA or Apple Silicon MPS — CPU works but ~40x slower)
 
+**1. Start the FastAPI service**
 ```bat
 cd omnivoice_service
-setup.bat   # creates venv, installs PyTorch 2.7 + OmniVoice
-start.bat   # first run downloads model from HuggingFace (~2–4 GB)
+setup.bat   # first time only — creates venv, installs PyTorch + OmniVoice
+start.bat   # starts uvicorn on http://localhost:8000 (downloads model ~2–4 GB on first run)
 ```
+
+**2. Open a new terminal and start ngrok**
+```bat
+ngrok http 8000
+```
+You'll see output like:
+```
+Forwarding  https://abc123.ngrok-free.app → http://localhost:8000
+```
+Copy that `https://...ngrok-free.app` URL.
+
+**3. Set the env var**
+
+Paste the ngrok URL into `OMNIVOICE_URL` in `.env.local` (local dev) and in your **Vercel project environment variables** (production).
+
+```
+OMNIVOICE_URL=https://introrse-quellingly-hyman.ngrok-free.dev
+```
+
+Then restart `npm run dev` so it picks up the new value.
+
+> ⚠️ The ngrok URL changes every time you restart ngrok — update `OMNIVOICE_URL` in `.env.local` and Vercel env vars each time.
 
 For Apple Silicon, replace the PyTorch install line in `setup.bat` with:
 ```bat
